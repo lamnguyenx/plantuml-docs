@@ -853,6 +853,140 @@ end note
 @enduml
 ```
 
+### Activity node titles with `==` separator
+
+Use the salt `==` separator inside a procedure to add a bold title above the wireframe form. The title sits outside the saltrendered box (above the `==` line) but inside the activity node.
+
+```plantuml
+@startuml
+!unquoted procedure SALT($x)
+"{{salt
+%invoke_procedure("_"+$x)
+}}" as $x
+!endprocedure
+
+!procedure _step2()
+{+
+  <b>Step 2 - Enter Name
+==
+  {/ Upload File | Record from Mic }
+..
+  Speaker Name
+  {
+    "AutoTestSpeaker01       "
+  }
+.
+  [Record]
+}
+!endprocedure
+
+(*) --> SALT(step2)
+@enduml
+```
+
+### Mix plain text with salt on `note on link`
+
+Inside a `note on link` block you can write plain text before the `{{salt ... }}` block — both will render together on the transition label.
+
+```plantuml
+@startuml
+!unquoted procedure SALT($x)
+"{{salt
+%invoke_procedure("_"+$x)
+}}" as $x
+!endprocedure
+
+!procedure _step1()
+{+
+  <b>Step 1
+==
+  Speaker Name
+  {
+    "                         "
+  }
+.
+  [Enroll]
+}
+!endprocedure
+
+!procedure _step2()
+{+
+  <b>Step 2
+==
+  Speaker Name
+  {
+    "AutoTestSpeaker01       "
+  }
+.
+  [Enroll]
+}
+!endprocedure
+
+(*) --> SALT(step1)
+-down-> SALT(step2)
+note on link
+  Type speaker name
+  {{salt
+  {+
+  Speaker Name
+  {
+    "AutoTestSpeaker01"
+  }
+  }
+  }}
+end note
+@enduml
+```
+
+### Salt buttons on `note on link`
+
+Salt-rendered buttons (using `[` `]` brackets) work inside `note on link` for compact transition labels.
+
+```plantuml
+@startuml
+!unquoted procedure SALT($x)
+"{{salt
+%invoke_procedure("_"+$x)
+}}" as $x
+!endprocedure
+
+!procedure _choose()
+{+
+  <b>Step 1
+==
+  {/ Upload File | Record from Mic }
+..
+  Speaker Name
+  {
+    "                         "
+  }
+.
+  [Record]
+}
+!endprocedure
+
+!procedure _wait()
+{+
+  <b>Step 2
+==
+  Recording...
+==
+  [<color:red> Stop (0:05)]
+}
+!endprocedure
+
+(*) --> SALT(choose)
+-down-> SALT(wait)
+note on link
+  {{salt
+  {+
+  [<color:blue> Record]
+  }
+  }}
+end note
+@enduml
+```
+
 ## Include salt "on while condition of activity diagram"
 
 You can include salt on while condition of activity diagram.
