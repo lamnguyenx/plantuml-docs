@@ -987,6 +987,98 @@ end note
 @enduml
 ```
 
+### Gotchas when mixing Salt with activity diagrams
+
+Three common pitfalls when using `!unquoted procedure` + SALT macros in activity diagrams:
+
+**1. Inline `:label` breaks on macro expansion.** When a SALT macro (`!unquoted procedure`) expands to `"... as name"` and the arrow has an inline `:label`, the parser sees `as name :label` and chokes. Always use `note on link` instead.
+
+```plantuml
+' This BROKEN snippet illustrates the issue:
+' stepA --> SALT(stepB) : click "OK"
+'                   ^^^^^^^^^^^^^^^^^ parser chokes on ":label" after "as name"
+```
+
+```plantuml
+@startuml
+!unquoted procedure SALT($x)
+"{{salt
+%invoke_procedure("_"+$x)
+}}" as $x
+!endprocedure
+!procedure _stepA()
+{+
+  Step A
+==
+  [Go]
+}
+!endprocedure
+!procedure _stepB()
+{+
+  Step B
+==
+  [OK]
+}
+!endprocedure
+
+(*) --> SALT(stepA)
+--> SALT(stepB)
+note on link : click "OK"
+@enduml
+```
+
+**2. Never re-expand a SALT macro for an existing activity.** Once an activity is created via `SALT(stepN)`, referencing it again as `SALT(stepN)` regenerates the full Salt block as a duplicate definition. Use the bare alias (e.g., just `stepN`) for all subsequent references — branch arrows, loop arrows, etc.
+
+```plantuml
+' This BROKEN snippet illustrates the issue:
+' SALT(stepA) --> SALT(stepB)
+' ^^^^^^^^^^ re-expands the macro, creating a duplicate activity definition
+```
+
+```plantuml
+@startuml
+!unquoted procedure SALT($x)
+"{{salt
+%invoke_procedure("_"+$x)
+}}" as $x
+!endprocedure
+!procedure _stepA()
+{+
+  Step A
+==
+  [Record]
+}
+!endprocedure
+!procedure _stepB()
+{+
+  Step B
+==
+  [Stop]
+}
+!endprocedure
+
+(*) --> SALT(stepA)
+--> SALT(stepB)
+
+' CORRECT — use bare alias for loop arrow
+stepB --> stepA
+@enduml
+```
+
+**3. `*` is not a SALT tab feature.** The documented way to mark an active/selected tab is Creole bold (`<b>`). Prefixing a tab with `*` (e.g., `{/ * Tab1 | Tab2 }`) is a custom convention with undefined behavior — it may not render as expected.
+
+```plantuml
+@startsalt
+{+
+  <b>Active tab
+==
+  {/ <b>Upload | Record }
+..
+  Content for Upload tab
+}
+@endsalt
+```
+
 ## Include salt "on while condition of activity diagram"
 
 You can include salt on while condition of activity diagram.
