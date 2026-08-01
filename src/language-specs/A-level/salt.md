@@ -1118,6 +1118,80 @@ stop
 
 [Ref. QA-14287]
 
+## Include salt "on sequence diagram"
+
+You can embed salt wireframes inside sequence diagram notes using the `{{salt` notation, similar to activity diagrams.
+
+```plantuml
+@startuml
+actor User
+participant "Web App" as App
+
+User -> App: Open Login Page
+
+note right of App
+  {{salt
+  {+
+  <b>Login Form
+  Username | "john_doe    "
+  Password | "****        "
+  [ Cancel ] | [   Login  ]
+  }
+  }}
+end note
+
+App --> User: Display UI
+@enduml
+```
+
+### Gotchas when mixing Salt with sequence diagrams
+
+**1. Brace nesting.** Inside `{{salt}}`, every `{` that begins a block (grid, tree, tab, menu, scroll) must have a matching `}` closer. If a text label accidentally starts with `{`, the salt parser interprets it as a nested block — causing a crash or broken layout.
+
+```plantuml
+' This BROKEN snippet illustrates the issue:
+' note right of App
+'   {{salt
+'   {+
+'   {  <b>Login Form           ' ← this "{" opens a nested grid!
+'   Username | "john_doe    "
+'   Password | "****        "
+'   [ Cancel ] | [   Login  ]
+'   }                          ' ← closes nested grid only — outer {+ still open
+'   }}
+' end note
+```
+
+To fix, either remove the stray `{` or add an extra `}`:
+
+```plantuml
+@startuml
+actor User
+participant "Web App" as App
+
+User -> App: Open Login Page
+
+note right of App
+  {{salt
+  {+
+  <b>Login Form
+  Username | "john_doe    "
+  Password | "****        "
+  [ Cancel ] | [   Login  ]
+  }
+  }}
+end note
+
+App --> User: Display UI
+@enduml
+```
+
+**2. No `@startsalt` / `@endsalt` inside `{{salt}}`.** The `{{salt` wrapper automatically adds these directives. Including them explicitly causes duplicate `@startsalt` / `@endsalt` lines.
+
+**3. Salt renders as an image inside the note.** The entire salt block is converted to an embedded raster or SVG image within the note, so it does not participate in the note's text flow or wrapping.
+
+**4. The note body is parsed as Creole first.** The `{{salt ... }}` wrapper is detected at the Creole level. Any text that starts with `{` outside a valid `{{salt` block is just plain Creole text — it will not be interpreted as salt markup.
+
 ## Skinparam
 
 You can use [only] some skinparam command to change the skin of the drawing.
@@ -1204,3 +1278,123 @@ Password | "****     "
 ```
 
 [Ref. QA-13460]
+
+## Real-world example: enrollment completion page
+
+A common dashboard pattern — a scrollable list of expandable items, a progress/coverage meter, action buttons, and speaker metadata. This example combines tabs, group boxes (`{^"..."}`), scrolled lists (`{SI}`), separators (`==`, `..`), grid tables (`{+}`, `{-}`), and OpenIconic icons — all in a single page wireframe.
+
+```plantuml
+@startsalt
+title ASV Dashboard — Enroll — Final State
+
+header Enroll Speaker
+
+{+
+  <color:green><&check-circle> <b>Bob enrolled successfully
+  ..
+  ==<b>Voice Coverage
+  {+
+  Good — 3 samples collected
+  ..
+  {-
+  <color:green>██████████████████████████████████████████████████████████████████
+  }
+  ..
+  For best accuracy, record 3–5 samples in different environments.
+  }
+  ..
+  ==<b>Recorded Samples
+  {SI
+  {^"Sample 1 (5s) <color:green><&check> Enrolled"
+  [<&play> Play] | [<&trash> Discard]
+  }
+  ..
+  {^"Sample 2 (5s) <color:green><&check> Enrolled"
+  [<&play> Play] | [<&trash> Discard]
+  }
+  ..
+  {^"Sample 3 (5s) <color:green><&check> Enrolled"
+  [<&play> Play] | [<&trash> Discard]
+  }
+  }
+  ..
+  [<&microphone> Record Another Sample]
+  ..
+  ==<b>Voice Print
+  {+
+  Speaker ID:  <b>4f7a09..e2d1
+  Created:     Jul 31, 2026
+  Samples:     3
+  }
+  ..
+  [<&people> Identify This Voice] | [<&search> Verify]
+  ..
+  [Enroll Another Speaker] | [<b>Go to Dashboard]
+}
+@endsalt
+```
+
+## Gotchas (empirically discovered)
+
+### `{^"..."}` inside `{SI}` → `ElementFactoryPyramid` crash
+
+PlantUML ≤ 1.2026.6 has a parser bug in `ElementFactoryPyramid.create` where combining `{^"..."}` group boxes inside `{SI}` scrolled lists triggers `IndexOutOfBoundsException`. The bug is sensitive to the surrounding grid context — placing `{SI}` as a **direct** child of `{+}` (no intermediate `{` wrapper) is particularly fragile.
+
+**Workaround**: always nest `{SI}` inside a plain `{...}` grid when using `{^"..."}` items, and keep the overall `{+}` block structurally simple.
+
+```plantuml
+' ✅ WORKS — {SI} wrapped in plain { } grid
+@startsalt
+{+
+  {
+    {SI
+    {^"Item 1 <color:green><&check> OK"
+    [Action]
+    }
+    ..
+    {^"Item 2 <color:green><&check> OK"
+    [Action]
+    }
+    }
+    ..
+    [Save All] | [Cancel]
+  }
+}
+@endsalt
+```
+
+```plantuml
+' ❌ MAY CRASH (1.2026.6) — {SI} directly inside {+}
+@startsalt
+{+
+  {SI
+  {^"Item 1 <color:green><&check> OK"
+  [Action]
+  }
+  ..
+  {^"Item 2 <color:green><&check> OK"
+  [Action]
+  }
+  }
+  ..
+  [Save All] | [Cancel]
+}
+@endsalt
+```
+
+Note: the crash is **nondeterministic** — structurally identical content may sometimes render and sometimes crash. Upgrading PlantUML to a newer version may resolve this.
+
+### `{-` horizontal scroll with inline color markup
+
+The `{-` widget (horizontal scrollbar only) can confuse the parser when its content line includes `<color:...>` markup spanning a long run of characters (e.g., a progress bar). **Workaround**: keep the line inside `{-` minimal; use multiple lines if needed.
+
+```plantuml
+' ✅ WORKS
+@startsalt
+{+ Progress: 80% }
+@endsalt
+```
+
+### `[<&icon> label]` vs `[<&icon>]` in group box titles
+
+Icon references (`<&icon>`) work reliably inside group box titles, button text, and grid cells. However, avoid placing `[` and `]` brackets **inside** a `{^"..."}` group box title — the `]` character can be misinterpreted as the end of the group box title delimiter.

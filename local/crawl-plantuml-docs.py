@@ -6,17 +6,27 @@ Crawls plantuml.com documentation pages and saves them as clean markdown.
 - Adds YAML frontmatter with source URL
 
 Usage:
-  python3 crawl-plantuml-docs.py              # crawl all pages
-  python3 crawl-plantuml-docs.py --page /salt  # crawl single page
-  python3 crawl-plantuml-docs.py --skip-existing  # skip already-crawled pages
+  python3 crawl-plantuml-docs.py --url https://plantuml.com/salt          # crawl a direct URL
+  python3 crawl-plantuml-docs.py --sitemap ../src/sitemap.yaml           # crawl every page from a sitemap YAML
+  python3 crawl-plantuml-docs.py -n 8 --sitemap ../src/sitemap.yaml      # crawl with 8 parallel workers
+  python3 crawl-plantuml-docs.py --section language-specs                # crawl one live sitemap section
+  python3 crawl-plantuml-docs.py                                         # crawl default diagram pages
+  python3 crawl-plantuml-docs.py --skip-existing                         # skip already-crawled pages
+
+With --sitemap, pages are saved as src/<section-slug>/<subsection-slug>.md.
 """
 
 import os
+import queue
 import re
 import sys
+import threading
 import time
+from urllib.parse import urlsplit
+
 import requests
 from bs4 import BeautifulSoup, Tag, NavigableString
+from tqdm import tqdm
 
 BASE_URL = "https://plantuml.com"
 
@@ -48,6 +58,69 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 EDIT_PREFIX = "Edit in DokuwikiEdit in AsciidocEdit in Markdown"
 
+# Slug used for each sitemap section. Keys are the exact sitemap section titles.
+SECTION_SLUGS = {
+    "Language specification": "language-specs",
+    "News and information": "news-and-information",
+    "Advanced Usage": "advanced-usage",
+    "Plugins": "plugins",
+}
+
+
+def slugify(text: str) -> str:
+    """Turn arbitrary text into a filesystem-safe slug."""
+    text = text.strip().lower()
+    text = re.sub(r"[^a-z0-9]+", "-", text)
+    return text.strip("-")
+
+
+def section_slug(title: str) -> str:
+    """Return the output slug for a sitemap section title."""
+    return SECTION_SLUGS.get(title, slugify(title))
+
+
+def fetch_sitemap():
+    """Fetch plantuml.com/sitemap and return a list of section dicts:
+    [{"title": ..., "slug": ..., "pages": [(name, path), ...]}, ...]
+    """
+    url = f"{BASE_URL}/sitemap"
+    headers = {"User-Agent": "Mozilla/5.0 (compatible; PlantUML Docs Crawler/1.0)"}
+    resp = requests.get(url, headers=headers, timeout=30)
+    resp.raise_for_status()
+    soup = BeautifulSoup(resp.text, "lxml")
+
+    main = soup.find("main")
+    run_div = None
+    for div in main.find_all("div"):
+        if div.get("id") == "run":
+            run_div = div
+            break
+    if run_div is None:
+        raise RuntimeError("Could not find sitemap #run container")
+
+    sections = []
+    current = None
+    for child in run_div.children:
+        if not isinstance(child, Tag):
+            continue
+        classes = child.get("class", [])
+        if child.name == "div" and "runt" in classes:
+            h2 = child.find("h2")
+            if not h2:
+                continue  # skip runt blocks without a section title
+            title = h2.get_text(strip=True)
+            current = {"title": title, "slug": section_slug(title), "pages": []}
+            sections.append(current)
+        elif child.name == "a" and "run1" in classes and current is not None:
+            name = child.find("b")
+            name = name.get_text(strip=True) if name else child.get_text(strip=True)
+            href = child.get("href", "")
+            if href:
+                if not href.startswith("/"):
+                    href = "/" + href
+                current["pages"].append((name, href))
+    return sections
+
 
 def url_to_filename(path: str) -> str:
     """Convert URL path to output filename."""
@@ -61,9 +134,32 @@ def url_to_title(path: str) -> str:
     return " ".join(word.capitalize() for word in clean.split())
 
 
+def normalize_path(url: str) -> str:
+    """Accept a full URL or a path, return the leading-/-path form."""
+    if url.startswith("http://") or url.startswith("https://"):
+        url = urlsplit(url).path
+    if not url.startswith("/"):
+        url = "/" + url
+    return url
+
+
+def load_sitemap(path: str):
+    """Load a sitemap YAML file: [{"title", "slug", "subsections": [path, ...]}, ...]."""
+    import yaml
+
+    with open(path) as f:
+        sections = yaml.safe_load(f)
+    for section in sections:
+        section["subsections"] = [normalize_path(p) for p in section.get("subsections", [])]
+    return sections
+
+
 def fetch_page(path: str) -> str:
-    """Fetch a page and return its HTML content."""
-    url = f"{BASE_URL}{path}"
+    """Fetch a page (path or full URL) and return its HTML content."""
+    if path.startswith("http://") or path.startswith("https://"):
+        url = path
+    else:
+        url = f"{BASE_URL}{path}"
     headers = {"User-Agent": "Mozilla/5.0 (compatible; PlantUML Docs Crawler/1.0)"}
     resp = requests.get(url, headers=headers, timeout=30)
     resp.raise_for_status()
@@ -340,9 +436,13 @@ def extract_page_content(html: str, page_path: str) -> str:
 
     # Add frontmatter
     title = url_to_title(page_path)
+    if page_path.startswith("http://") or page_path.startswith("https://"):
+        source_url = page_path
+    else:
+        source_url = f"{BASE_URL}{page_path}"
     frontmatter = f"""---
 title: {title} — PlantUML Official Documentation
-source: {BASE_URL}{page_path}
+source: {source_url}
 description: Official documentation for PlantUML {title}
 ---
 
@@ -350,23 +450,22 @@ description: Official documentation for PlantUML {title}
     return frontmatter + final
 
 
-def crawl_page(page_path: str, skip_existing: bool = False) -> bool:
-    """Crawl a single page and save it."""
+def crawl_page(page_path: str, skip_existing: bool = False, output_dir: str = OUTPUT_DIR) -> dict:
+    """Crawl a single page and save it. Returns a result dict."""
+    page_path = normalize_path(page_path)
     filename = url_to_filename(page_path)
-    output_path = os.path.join(OUTPUT_DIR, filename)
+    output_path = os.path.join(output_dir, filename)
+    result = {"page": page_path, "filename": filename}
 
     if skip_existing and os.path.exists(output_path):
-        print(f"  SKIP (exists): {filename}")
-        return True
-
-    print(f"  Fetching {BASE_URL}{page_path} ...", end=" ", flush=True)
+        result.update(status="skipped", ok=True)
+        return result
 
     try:
         html = fetch_page(page_path)
-        print("OK", end=" ", flush=True)
     except Exception as e:
-        print(f"FAILED: {e}")
-        return False
+        result.update(status="failed", ok=False, error=str(e))
+        return result
 
     try:
         markdown = extract_page_content(html, page_path)
@@ -374,17 +473,154 @@ def crawl_page(page_path: str, skip_existing: bool = False) -> bool:
         with open(output_path, "w") as f:
             f.write(markdown)
         code_blocks = markdown.count("```plantuml")
-        print(f"→ {filename} ({len(markdown)} chars, {code_blocks} code blocks)")
-        return True
+        result.update(status="ok", ok=True, chars=len(markdown), code_blocks=code_blocks)
     except Exception as e:
-        print(f"PARSE FAILED: {e}")
+        result.update(status="failed", ok=False, error=f"parse: {e}")
         import traceback
         traceback.print_exc()
-        return False
+    return result
+
+
+MAX_WORKERS = 4
+
+
+def _worker(task_queue: queue.Queue, results: queue.Queue, skip_existing: bool, output_dir: str, delay: float = 0) -> None:
+    """Worker loop: pull page paths off the task queue, crawl, push result."""
+    while True:
+        page = task_queue.get()
+        if page is None:  # sentinel: no more work
+            task_queue.task_done()
+            break
+        result = crawl_page(page, skip_existing, output_dir)
+        results.put(result)
+        task_queue.task_done()
+        if delay > 0 and result["status"] != "skipped":
+            time.sleep(delay)
+
+
+def crawl_batch(pages, skip_existing: bool = False, output_dir: str = OUTPUT_DIR, max_workers: int = MAX_WORKERS, delay: float = 0.5) -> dict:
+    """Crawl many pages in parallel (max_workers worker threads) with a tqdm progress bar.
+
+    Uses a producer/worker-queue pattern: tasks go in, results come out, and the
+    main thread consumes the result queue so it can render cumulative progress.
+
+    pages: iterable of page paths (str) or (name, path) tuples.
+    Returns {"ok": n, "failed": n, "skipped": n, "errors": [...]}.
+    """
+    def to_path(page):
+        if isinstance(page, tuple):
+            return page[1]
+        return page
+
+    paths = [to_path(p) for p in pages]
+
+    task_queue = queue.Queue()
+    results = queue.Queue()
+    for p in paths:
+        task_queue.put(p)
+    for _ in range(max_workers):
+        task_queue.put(None)  # one sentinel per worker
+
+    workers = [
+        threading.Thread(target=_worker, args=(task_queue, results, skip_existing, output_dir, delay), daemon=True)
+        for _ in range(max_workers)
+    ]
+    for w in workers:
+        w.start()
+
+    summary = {"ok": 0, "failed": 0, "skipped": 0, "errors": []}
+    with tqdm(total=len(paths), desc="Crawling", unit="page", dynamic_ncols=True) as pbar:
+        for _ in range(len(paths)):
+            result = results.get()
+            status = result["status"]
+            summary[status] = summary.get(status, 0) + 1
+            if status == "failed":
+                summary["errors"].append(f"{result['filename']}: {result.get('error', 'unknown')}")
+            pbar.set_postfix_str(f"{summary['ok']} ok, {summary['failed']} failed")
+            pbar.update(1)
+
+    for w in workers:
+        w.join()
+
+    return summary
 
 
 def main():
     skip_existing = "--skip-existing" in sys.argv
+
+    def parse_flag(name):
+        for arg in sys.argv[1:]:
+            if arg.startswith(f"--{name}="):
+                return arg.split("=", 1)[1]
+            if arg == f"--{name}":
+                i = sys.argv.index(arg)
+                if i + 1 < len(sys.argv):
+                    return sys.argv[i + 1]
+        return None
+
+    max_workers = MAX_WORKERS
+    delay = 0.5
+    for arg in sys.argv[1:]:
+        if arg == "-n" or arg.startswith("-n=") or arg.startswith("--workers="):
+            raw = arg.split("=", 1)[1] if "=" in arg else sys.argv[sys.argv.index(arg) + 1]
+            try:
+                max_workers = int(raw)
+            except ValueError:
+                print(f"Invalid worker count: {raw}")
+                sys.exit(1)
+        if arg.startswith("--delay="):
+            try:
+                delay = float(arg.split("=", 1)[1])
+            except ValueError:
+                print(f"Invalid delay: {arg}")
+                sys.exit(1)
+
+    KNOWN_FLAGS = {"--url", "--sitemap", "--page", "--section",
+                   "--skip-existing", "--workers", "--delay", "-n"}
+    for arg in sys.argv[1:]:
+        if arg.startswith("-") and arg not in KNOWN_FLAGS:
+            name = arg.split("=", 1)[0]
+            if name in KNOWN_FLAGS:
+                continue
+            print(f"Unknown flag: {arg}")
+            sys.exit(1)
+
+    # Direct URL mode
+    url = parse_flag("url")
+    if url is not None:
+        print(f"Crawling URL: {url}")
+        result = crawl_page(normalize_path(url), skip_existing)
+        if result["status"] == "failed":
+            print(f"  FAILED: {result.get('error')}")
+        elif result["status"] == "skipped":
+            print("  SKIP (exists)")
+        else:
+            print(f"  OK → {result['filename']} ({result['chars']} chars, {result['code_blocks']} code blocks)")
+        sys.exit(0 if result["ok"] else 1)
+
+    # Sitemap YAML mode: crawl every section's pages into src/<slug>/<page>.md
+    sitemap_path = parse_flag("sitemap")
+    if sitemap_path is not None:
+        sections = load_sitemap(sitemap_path)
+        print(f"Crawling {len(sections)} sections from {sitemap_path} ({max_workers} workers)")
+        print(f"Output directory: {OUTPUT_DIR}")
+        print()
+
+        total_ok = total_failed = total_skipped = 0
+        for i, section in enumerate(sections, 1):
+            slug = section["slug"]
+            section_dir = os.path.join(OUTPUT_DIR, slug)
+            print(f"[{i}/{len(sections)}] {section['title']} ({slug}) — {len(section['subsections'])} pages")
+            summary = crawl_batch(section["subsections"], skip_existing, section_dir, max_workers, delay)
+            total_ok += summary["ok"]
+            total_failed += summary["failed"]
+            total_skipped += summary["skipped"]
+            for err in summary["errors"]:
+                print(f"  FAILED: {err}")
+            print()
+
+        print(f"Done: {total_ok} ok, {total_failed} failed, {total_skipped} skipped")
+        sys.exit(0 if total_failed == 0 else 1)
 
     # Single page mode
     for arg in sys.argv[1:]:
@@ -393,30 +629,51 @@ def main():
             if not page_path.startswith("/"):
                 page_path = "/" + page_path
             print(f"Crawling single page: {page_path}")
-            success = crawl_page(page_path, skip_existing)
-            sys.exit(0 if success else 1)
+            result = crawl_page(page_path, skip_existing)
+            if result["status"] == "failed":
+                print(f"  FAILED: {result.get('error')}")
+            elif result["status"] == "skipped":
+                print("  SKIP (exists)")
+            else:
+                print(f"  OK → {result['filename']} ({result['chars']} chars, {result['code_blocks']} code blocks)")
+            sys.exit(0 if result["ok"] else 1)
 
-    print(f"Crawling {len(PAGES)} pages from {BASE_URL}")
+    # Section mode: crawl every page listed under a sitemap section
+    for arg in sys.argv[1:]:
+        if arg.startswith("--section="):
+            requested = arg.split("=", 1)[1].strip().lower()
+            sections = fetch_sitemap()
+            section = None
+            for s in sections:
+                if s["slug"].lower() == requested or s["title"].lower() == requested:
+                    section = s
+                    break
+            if section is None:
+                available = ", ".join(s["slug"] for s in sections)
+                print(f"Unknown section '{requested}'. Available: {available}")
+                sys.exit(1)
+
+            section_dir = os.path.join(OUTPUT_DIR, section["slug"])
+            print(f"Crawling section: {section['title']} ({section['slug']})")
+            print(f"  {len(section['pages'])} pages → {section_dir}")
+            print()
+
+            summary = crawl_batch(section["pages"], skip_existing, section_dir, max_workers, delay)
+            for err in summary["errors"]:
+                print(f"  FAILED: {err}")
+            print()
+            print(f"Done: {summary['ok']} ok, {summary['failed']} failed, {summary['skipped']} skipped")
+            sys.exit(0 if summary["failed"] == 0 else 1)
+
+    print(f"Crawling {len(PAGES)} pages from {BASE_URL} ({max_workers} workers)")
     print(f"Output directory: {OUTPUT_DIR}")
     print()
 
-    success = 0
-    failed = 0
-    skipped = 0
-
-    for i, page_path in enumerate(PAGES, 1):
-        print(f"[{i}/{len(PAGES)}]", end=" ")
-        ok = crawl_page(page_path, skip_existing)
-        if ok:
-            success += 1
-        else:
-            failed += 1
-        # Be polite between requests
-        if i < len(PAGES):
-            time.sleep(0.5)
-
+    summary = crawl_batch(PAGES, skip_existing, max_workers=max_workers, delay=delay)
+    for err in summary["errors"]:
+        print(f"  FAILED: {err}")
     print()
-    print(f"Done: {success} ok, {failed} failed, {skipped} skipped")
+    print(f"Done: {summary['ok']} ok, {summary['failed']} failed, {summary['skipped']} skipped")
 
 
 if __name__ == "__main__":
