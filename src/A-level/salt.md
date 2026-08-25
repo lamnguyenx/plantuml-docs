@@ -12,6 +12,204 @@ It is very useful in crafting graphical interfaces, schematics, and blueprints. 
 
 Developers, designers, and user experience professionals employ them to visualize interface elements, navigational systems, and to facilitate collaboration. They vary in fidelity, from low-detail sketches to high-detail representations, crucial for prototyping and iterative design. This collaborative process integrates different expertise, from business analysis to user research, ensuring that the end design aligns with both business and user requirements.
 
+## Common mistakes
+
+> **Read this first.** These are the most frequent SALT pitfalls. Each follows the same template: a description, a **Wrong** sketch (rendered so you can see how it breaks), and a **Right** sketch that fixes it.
+
+### 1. Adjacent widgets without a `|` separator  *(most common)*
+
+In a SALT grid, **columns are separated by `|`**. Placing two buttons next to each other with only whitespace — `[Cancel] [OK]` — does **not** produce two buttons. The bracket pair `][` between them is parsed as **literal text**, so the line renders as one button followed by the characters `][ ` followed by a second token that is *not* buttonified. Always insert a pipe between sibling widgets that belong in separate columns.
+
+#### Wrong
+
+```plantuml
+@startsalt
+{+
+[Cancel] [OK]
+}
+@endsalt
+```
+
+#### Right
+
+```plantuml
+@startsalt
+{+
+[Cancel] | [OK]
+}
+@endsalt
+```
+
+The rule applies at **every** column boundary — button↔button, text↔button, text↔field, icon↔icon — not only pairs of buttons. When uncertain, add the pipe. See [Using grid](#using-grid--and----).
+
+### 2. Columns leak across rows in the same `{...}` block
+
+A window starts with `{`. As soon as that bracket opens, PlantUML is in **grid mode**, and a `|` in *any* row separates columns for that row. But rows in the *same* `{...}` block **share one column structure**: if one row has `|`, every row inherits those columns — even rows written without `|`. This silently stretches or squeezes unrelated widgets to align with the widest column. Use a **different nested bracket type** (`{+}`, `{!}`, `{#}`, `{-}`) per zone so each gets independent columns. See [Decoupling column layouts](#decoupling-column-layouts-with-nested-grids).
+
+#### Wrong
+
+The long text and the button get squeezed into column 1 of a 3-column grid they never asked for, because the bottom row's `|` leaked upward:
+
+```plantuml
+@startsalt
+{+
+Some long text that we want full-width
+..
+[ A button ]
+==
+[X] | [ Y ] | [Z]
+}
+@endsalt
+```
+
+#### Right
+
+Each zone is wrapped in its own `{!}` so column layouts stay independent — the text spans full width, the button row sits below it, and only the bottom row has three columns:
+
+```plantuml
+@startsalt
+{+
+{!
+Some long text that we want full-width
+..
+[ A button ]
+}
+==
+{!
+[X] | [ Y ] | [Z]
+}
+}
+@endsalt
+```
+
+### 3. A label that starts with `{` opens a nested block
+
+If a text label begins with `{`, the SALT parser treats it as the start of a **nested grid**, not as text. The following rows are then swallowed into an unexpected inner frame, distorting the layout (and in many cases the brace count goes unbalanced, producing a cryptic error). Never start a label with `{`; use a group-box title (`{^"..."}`) or a plain text line instead.
+
+#### Wrong
+
+The stray `{` before "Login Form" opens a nested grid, so the whole form gets drawn inside an extra frame:
+
+```plantuml
+@startsalt
+{+
+{  Login Form
+"user  "
+"password  "
+[OK]
+}
+}
+@endsalt
+```
+
+#### Right
+
+Use `{^"..."}` for a titled group box — the title renders as text, no stray grid is opened:
+
+```plantuml
+@startsalt
+{+
+{^"Login Form"
+"user  "
+"password  "
+[OK]
+}
+}
+@endsalt
+```
+
+### 4. `[` or `]` inside a `{^"..."}` group-box title
+
+Salt parses `{^"...title..."}` as a group box. A literal `]` anywhere inside the title string can be misread as the end of the title delimiter, truncating the title and leaving the rest of the line dangling. Keep `[` and `]` out of group-box titles; rewrite the label without brackets.
+
+#### Wrong
+
+The `]` after "Advanced" terminates the title early, so "Settings" is all that survives as the title and `] Options` leaks as grid content:
+
+```plantuml
+@startsalt
+{^"Settings [Advanced] Options"
+[Cancel] | [OK]
+}
+@endsalt
+```
+
+#### Right
+
+Drop the brackets from the title; use parentheses or a dash if you need a sub-label:
+
+```plantuml
+@startsalt
+{^"Settings (Advanced) Options"
+[Cancel] | [OK]
+}
+@endsalt
+```
+
+### 5. Expecting pixel-accurate layout (flex, centering, fixed widths)
+
+SALT auto-sizes columns to their content. It has no equivalent of CSS flexbox — no "equal flanks keep this control centered", no "this button is twice as wide", no fixed pixel widths. Trying to fake centering with empty padding cells does not work and misleads readers. Draw the **logical widget order** with `|`, and describe the real positioning in a short **diagram caveat** (a `>` blockquote note next to the sketch).
+
+#### Wrong
+
+Attempting to center the Record button by inserting empty cells — SALT just renders four equal columns, so the pill lands at the 3rd-of-4 position, not centered, *and* looks like a 4-button toolbar:
+
+```plantuml
+@startsalt
+{+
+[⚙️] | [] | [● Record] | [🗑️]
+}
+@endsalt
+```
+
+#### Right
+
+Render the logical order in one row, then let a caveat note carry the positioning semantics that SALT cannot express:
+
+```plantuml
+@startsalt
+{+
+[⚙️] | [● Record] | [🗑️]
+}
+@endsalt
+```
+
+> **Diagram caveat:** in the real UI the Record pill is **horizontally centered** on the viewport — the dock's controls row is a `justify="space-between"` flex with equal-weight flanks (`flex: 1 1 0` left, `flex: 0 0 auto` center, `flex: 1 1 0` right). Read the sketch above as *logical order*, not pixel positions.
+
+### 6. Unicode escape sequences instead of real characters  *(esp. in `.puml` / `.puml.md`)*
+
+PlantUML reads source as **UTF-8** and renders Unicode glyphs (Block elements `▁▂▃`, symbols `✓ ● ■ ✅`, math `×`, emoji) verbatim. It does **not** interpret backslash escapes such as `\u2581`, `\u00d7`, `\u2705` — inside a SALT block these sequences are drawn as the literal six characters `\u2581`, not as the intended glyph. Always paste the **actual Unicode character** into the source; never use `\uXXXX` escapes. (This applies to every PlantUML source file, not just SALT.)
+
+#### Wrong
+
+`\u2705` and `\u2581\u2582\u2583` render as the literal ASCII text `\u2705 Done` and `\u2581\u2582\u2583 waveform` — the glyphs never appear:
+
+```plantuml
+@startsalt
+{+
+Status: \u2705 Done
+[\u2581\u2582\u2583 waveform]
+}
+@endsalt
+```
+
+#### Right
+
+Paste the real characters — UTF-8 source, no escapes:
+
+```plantuml
+@startsalt
+{+
+Status: ✅ Done
+[▁▂▃ waveform]
+}
+@endsalt
+```
+
+If your editor or terminal corrupts glyphs, save the file as UTF-8 (no BOM) and verify with `file -i <path>`; do **not** "fix" mojibake by switching to `\uXXXX` — it will not render in PlantUML.
+
+---
+
 ## Basic widgets
 
 You must use @startsalt keyword.
@@ -106,6 +304,12 @@ You can open a droplist, by adding values enclosed by ^, as:
 A table is automatically created when you use an opening bracket {.
 And you have to use | to separate columns.
 
+> **The `|` is mandatory between sibling widgets.** Without it, adjacent
+> brackets collapse: `[A] [B]` renders the `][` between them as **literal
+> text**, not as a column break — you get one widget, the characters `][`,
+> and a second token that is never buttonified. Write `[A] | [B]`. This is
+> the single most common SALT mistake; see [Common mistakes §1](#1-adjacent-widgets-without-a--separator--most-common).
+
 For example:
 
 ```plantuml
@@ -183,6 +387,39 @@ Another text
 }
 @endsalt
 ```
+
+## Decoupling column layouts with nested grids
+
+In a `{+}` grid, every row shares the same column structure. If one row
+has `|` pipes (creating columns), all rows inherit those columns — even
+rows without `|`. This can cause buttons to stretch to the width of
+long text elsewhere in the diagram.
+
+The key: nest zones under the outer `{+}` using **different** bracket
+types. Each bracket type (`{+}`, `{!}`, `{#}`, `{-}`, `{`) creates an
+independent grid with its own column layout. Content in one zone will
+not stretch columns in another.
+
+```plantuml
+@startsalt
+{+
+  {!
+  Some long text that would stretch a button
+  ..
+  [ A button ]
+  }
+  ==
+  {!
+  [X] | [ Y ] | [Z]
+  }
+}
+@endsalt
+```
+
+Here both inner zones use `{!}` (vertical grid lines), but you can mix
+types freely — use `{#}` (all lines) for one zone and `{!}` for another.
+The only rule: each zone gets its own bracket pair. The outer `{+}` just
+provides the outer frame and the `==` separator between zones.
 
 ## Tree widget [T]
 
@@ -1077,6 +1314,38 @@ stepB --> stepA
   Content for Upload tab
 }
 @endsalt
+```
+
+**4. State name `start` is reserved — silently drops salt content.** When the SALT macro creates a state via `SALT(start)`, the resulting activity diagram node name is `"start"`. Since `start` is the reserved keyword for the initial node `(*)` in PlantUML activity diagrams, the parser conflates the two: the node exists (transitions to/from it work) but no salt content is rendered — it's silently treated as an alias for the built-in start node.
+
+**Fix**: never name a procedure `_start()`. Use `_form_empty()`, `_initial()`, or any non-reserved name.
+
+```plantuml
+' This BROKEN snippet illustrates the issue:
+' !procedure _start()
+' ...
+' (*) --> SALT(start)   ' "start" is reserved — salt content silently dropped
+```
+
+```plantuml
+' ✅ WORKS — renamed to avoid reserved keyword
+@startuml
+!unquoted procedure SALT($x)
+"{{salt
+%invoke_procedure("_"+$x)
+}}" as $x
+!endprocedure
+
+!procedure _form_empty()
+{+
+  <b>Enroll Speaker
+  ==
+  [Record]
+}
+!endprocedure
+
+(*) --> SALT(form_empty)
+@enduml
 ```
 
 ## Include salt "on while condition of activity diagram"

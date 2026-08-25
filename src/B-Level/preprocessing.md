@@ -298,7 +298,7 @@ List : void clear()
 ```
 
 ## Including Subpart [!startsub, !endsub, !includesub]
-```
+```puml
 @startuml
 
 A -> A : stuff1
@@ -311,7 +311,7 @@ D -> D : stuff4
 !endsub
 @enduml
 ```
-```
+```puml
 @startuml
 
 A -> A : stuff1
@@ -320,14 +320,14 @@ C -> C : stuff3
 D -> D : stuff4
 @enduml
 ```
-```
+```puml
 @startuml
 
 title this contains only B and D
 !includesub file1.puml!BASIC
 @enduml
 ```
-```
+```puml
 @startuml
 
 title this contains only B and D
@@ -434,7 +434,7 @@ Alice -> Bob : Hello
 ```
 
 ## Building custom library [!import, !include]
-```
+```puml
 @startuml
 
 !import /path/to/customLibrary.zip

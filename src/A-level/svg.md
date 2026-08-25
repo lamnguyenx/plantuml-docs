@@ -6,7 +6,7 @@ description: Official documentation for PlantUML Svg
 
 # Scalable Vector Graphics
 
-PlantUML Advanced usage SVG Support Â Â Â Â
+PlantUML Advanced usage SVG Support
 
 ### Command Line
 
@@ -29,7 +29,7 @@ PlantUML Advanced usage SVG Support Â Â Â Â
 - _top : Opens the link in the full body of the window
 
 ### pathHoverColor
-```
+```puml
 @startuml
 skinparam pathHoverColor green
 class Foo2 [[http://www.yahoo.com/Foo2]] {
@@ -43,7 +43,7 @@ Foo2 --> Foo3
 [Reference: QA-5453 ]
 
 ### svgDimensionStyle
-```
+```puml
 @startuml
 skinparam svgDimensionStyle false
 
@@ -65,7 +65,7 @@ a -(0- b
 - !pragma svgSize <U+hhhhh> I
 
 #### Example Usage
-```
+```puml
 @startuml
 !pragma svgSize <U+1F610> XX
 
@@ -91,12 +91,18 @@ java -jar plantuml.jar "-PsvgSize=<U+1F610> XX" "-PsvgSize=<U+1F611> I" -Tsvg <f
 
 ## Interactive SVG
 
-- When you click on a diagram element, all other elements that are not connected to it, are dimmed out.
-- When you click the same element twice, all elements are restored to their original visibility.
+Interactive SVG is enabled with `!pragma svgInteractive true` inside the `@startuml ... @enduml` block (the value is a convention — any non-empty string works). PlantUML embeds a JavaScript bundle and CSS stylesheet directly into the SVG output, chosen by diagram type. No post-processing or external files are needed.
 
 - QA-13350
 
 ### On Class, Object, UseCase or Deployment diagram
+
+On these diagram types, interactions operate on elements connected by arrows/associations (internal `g.entity` and `g.link` elements):
+
+- **Hover** (mouseover): the hovered element and its direct neighbors stay at full opacity; everything else dims. Moving the mouse away restores the diagram.
+- **Click**: same as hover but *locked* — the selection stays highlighted after the mouse moves away. Click the same element again to clear.
+- **Double-click**: highlights the *transitive closure* — the clicked element **and every other element reachable from it through any number of links** (the entire connected graph). Double-click again to clear.
+- Pressing **`Escape`** clears the click selection without affecting the current hover highlight (hover and click are independent states).
 
 ```plantuml
 @startuml
@@ -144,6 +150,9 @@ c -u-> UC5
 
 ### On Sequence diagram
 
+- **Participant filter**: click a participant name or lifeline to highlight its messages in green (everything else dims). Click additional participants to filter by multiple lifelines — only messages touching all of them are highlighted. Click a selected participant again to remove it from the filter; when the set is empty the diagram is fully restored. If no message matches the selection, participants turn red instead.
+- **Floating header**: a pin button (📌) appears in the participant header row. Click it to pin the header to the top of the viewport while scrolling. The pinned state persists in `localStorage` across page loads (requires HTTP hosting — `file://` storage is unreliable).
+
 ```plantuml
 @startuml
 !pragma svginteractive true
@@ -174,37 +183,18 @@ end
 |||
 Alice -> Bob : message 1
 Alice -> Bob : message 2
+|||
 Alice -> Bob : message 3
 Alice -> Bob : message 4
 Alice -> Bob : message 5
-Alice -> Bob : message 6
-Alice -> Bob : message 7
-Alice -> Bob : message 8
-Alice -> Bob : message 9
-|||
-Alice -> Bob : message 10
-Alice -> Bob : message 11
-Alice -> Bob : message 12
-Alice -> Bob : message 13
-Alice -> Bob : message 14
-Alice -> Bob : message 15
-Alice -> Bob : message 16
-Alice -> Bob : message 17
-Alice -> Bob : message 18
-Alice -> Bob : message 19
-|||
-Alice -> Bob : message 20
-Alice -> Bob : message 21
-Alice -> Bob : message 22
-Alice -> Bob : message 23
-Alice -> Bob : message 24
-Alice -> Bob : message 25
-Alice -> Bob : message 26
-Alice -> Bob : message 27
-Alice -> Bob : message 28
-Alice -> Bob : message 29
+
 @enduml
 ```
+
+### All diagram types — links and tooltips (native SVG, no JS needed)
+
+- **Links**: `[[url label]]` on a participant, class, use case, message, or any other element wraps it in `<a href="url">` — clickable in the browser. Use skinparam `svgLinkTarget` to control the target (`_blank`, `_parent`, `_self`, `_top`).
+- **Tooltips**: `[[url{tooltip} label]]` emits a `<title>tooltip</title>` inside the link — native browser hover tooltip.
 
 ## Option for SVG [ svgTitle , svgDesc ]
 
