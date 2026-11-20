@@ -1079,6 +1079,38 @@ stepB --> stepA
 @endsalt
 ```
 
+**4. State name `start` is reserved — silently drops salt content.** When the SALT macro creates a state via `SALT(start)`, the resulting activity diagram node name is `"start"`. Since `start` is the reserved keyword for the initial node `(*)` in PlantUML activity diagrams, the parser conflates the two: the node exists (transitions to/from it work) but no salt content is rendered — it's silently treated as an alias for the built-in start node.
+
+**Fix**: never name a procedure `_start()`. Use `_form_empty()`, `_initial()`, or any non-reserved name.
+
+```plantuml
+' This BROKEN snippet illustrates the issue:
+' !procedure _start()
+' ...
+' (*) --> SALT(start)   ' "start" is reserved — salt content silently dropped
+```
+
+```plantuml
+' ✅ WORKS — renamed to avoid reserved keyword
+@startuml
+!unquoted procedure SALT($x)
+"{{salt
+%invoke_procedure("_"+$x)
+}}" as $x
+!endprocedure
+
+!procedure _form_empty()
+{+
+  <b>Enroll Speaker
+  ==
+  [Record]
+}
+!endprocedure
+
+(*) --> SALT(form_empty)
+@enduml
+```
+
 ## Include salt "on while condition of activity diagram"
 
 You can include salt on while condition of activity diagram.

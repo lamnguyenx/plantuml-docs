@@ -27,14 +27,14 @@ description: Official documentation for PlantUML Commons
 ## Comments
 
 ### Simple comment
-```
+```puml
 @startuml
 'Line comments use a single apostrophe
 @enduml
 ```
 
 ### Block comment
-```
+```puml
 @startuml
 /'
 many lines comments
@@ -45,7 +45,7 @@ here
 
 ```plantuml
 @startuml
-/' case 1 '/   A -> B : AB-First step 
+/' case 1 '/   A -> B : AB-First step
                B -> C : BC-Second step
 /' case 2 '/   D -> E : DE-Third step
 @enduml
@@ -233,7 +233,7 @@ legend
 The legend
 end legend
 
-a -- b 
+a -- b
 
 @enduml
 ```
@@ -677,7 +677,7 @@ legend
 The legend
 end legend
 
-a -- b 
+a -- b
 
 @enduml
 ```
@@ -1243,7 +1243,7 @@ FIXME FIXME
 @startuml
 mainframe This is a **mainframe**
 
-a -- b 
+a -- b
 @enduml
 ```
 
@@ -1428,7 +1428,7 @@ legend
 The legend
 end legend
 
-a -- b 
+a -- b
 
 @enduml
 ```

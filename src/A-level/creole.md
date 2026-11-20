@@ -45,7 +45,7 @@ legend
   # Second item
   ## Sub item
   ## Another sub item
-        * Can't quite mix 
+        * Can't quite mix
         * Numbers and bullets
   # Third item
 end legend
@@ -89,7 +89,7 @@ Alice -> Bob : Without color: <#0:sunglasses:>
 Alice -> Bob : Change color: <#green:sunny:>
 @enduml
 ```
-```
+```puml
 @startuml
 emoji <block>
 @enduml
@@ -365,7 +365,7 @@ rectangle "Box B" {
     component B [
         Level 1
         |_ Level 2a
-          |_ Level 3a 
+          |_ Level 3a
           |_ Level 3b
           |_ Level 3c
             |_ Level 4a
@@ -557,7 +557,7 @@ class a {
 # Third item
 }
 
-a -- b 
+a -- b
 
 @enduml
 ```
@@ -622,7 +622,7 @@ object user {
 ** Sub item
 *** Sub sub item
 * Third item
-----	
+----
 **test list 2**
 # Numbered list
 # Second item
@@ -809,7 +809,7 @@ Or single-line title
 Enjoy!
 }
 
-a -- b 
+a -- b
 
 @enduml
 ```
@@ -1014,7 +1014,7 @@ Enjoy!;
 
 ```plantuml
 @startmindmap
-* Style equivalent\n(between Creole and HTML) 
+* Style equivalent\n(between Creole and HTML)
 **:**Creole**
 ----
 <#silver>|= code|= output|
@@ -1058,7 +1058,7 @@ test Unicode and icons
   This is a <&code> icon
   Use image : <img:https://plantuml.com/logo3.png>
 
-<b>HTML Creole 
+<b>HTML Creole
   This is <b>bold</b>
   This is <i>italics</i>
   This is <font:monospaced>monospaced</font>
